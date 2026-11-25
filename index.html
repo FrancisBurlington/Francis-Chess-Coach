@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Position Analyzer - Live Coach</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#262421">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Chess Coach">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <style>
+        /* --- VISUAL LOADING SCREEN (SPLASH) --- */
+        #splash-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #121212; z-index: 9999;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            transition: opacity 0.8s ease, visibility 0.8s;
+        }
+        .splash-icon { font-size: 90px; color: #4CAF50; animation: pulse 1.5s infinite ease-in-out; }
+        .splash-title { color: #ffffff; font-family: 'Segoe UI', sans-serif; font-size: 22px; letter-spacing: 5px; margin-top: 25px; font-weight: 300; text-transform: uppercase; }
+        .splash-subtitle { color: #888; font-family: 'Segoe UI', sans-serif; font-size: 13px; margin-top: 10px; letter-spacing: 1px; }
+        .splash-loader { width: 220px; height: 3px; background: #333; margin-top: 35px; border-radius: 2px; overflow: hidden; }
+        .splash-loader-bar { width: 40%; height: 100%; background: #4CAF50; animation: slide 1.5s infinite ease-in-out; }
+        @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.8; } }
+        @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+        .splash-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+
+        /* --- MAIN APP UI --- */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 1500px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 20px; }
+        .board-container { flex: 3 1 640px; min-width: 300px; position: relative; }
+        
+        /* Arrow overlay container */
+        #arrow-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 10;
+        }
+        #arrow-overlay svg { width: 100%; height: 100%; }
+
+        .board-row { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+        .legend { flex: 0 0 140px; background: white; padding: 12px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); font-size: 13px; }
+        .legend-title { font-weight: bold; margin-bottom: 10px; }
+        .legend-item { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
+        .legend-item small { display: block; color: #666; margin-top: 2px; font-family: monospace; }
+        .swatch { flex: 0 0 18px; height: 18px; border-radius: 4px; margin-top: 1px; }
+        .legend-note { color: #777; font-size: 11px; line-height: 1.4; border-top: 1px solid #eee; padding-top: 8px; }
+        #live-stage { position: relative; width: 100%; background: #111; border-radius: 4px; margin-top: 10px; cursor: crosshair; touch-action: none; user-select: none; }
+        #live-video { width: 100%; display: block; pointer-events: none; }
+        #crop-hint { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: #fff; padding: 6px 12px; border-radius: 4px; font-size: 13px; pointer-events: none; display: none; }
+        #crop-box { position: absolute; border: 2px solid #4CAF50; background: rgba(76,175,80,0.15); display: none; pointer-events: none; }
+        .controls-container { flex: 2 1 360px; min-width: 300px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        @media (max-width: 700px) {
+            body { padding: 8px; }
+            .container { gap: 10px; }
+            .tabs { overflow-x: auto; }
+            .tab { padding: 10px 12px; white-space: nowrap; }
+            button, select { min-height: 40px; }
+        }
+        .tabs { display: flex; border-bottom: 2px solid #eee; margin-bottom: 15px; }
+        .tab { padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent; }
+        .tab.active { border-bottom-color: #4CAF50; color: #4CAF50; font-weight: bold; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        textarea { width: 100%; height: 80px; margin-bottom: 10px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; box-sizing: border-box; }
+        button { background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 5px; margin-bottom: 5px; }
+        button:hover { background: #45a049; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        button.coach-btn { background: #2196F3; }
+        button.coach-btn.active { background: #0d47a1; box-shadow: inset 0 0 5px rgba(0,0,0,0.5); }
+        
+        .analysis-panel { margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 8px; }
+        .eval-score { font-size: 1.2em; font-weight: bold; color: #333; margin-bottom: 10px; }
+        .move-recommendation { background: white; padding: 12px; margin-bottom: 8px; border-radius: 4px; border-left: 4px solid #4CAF50; cursor: pointer; transition: background 0.2s; }
+        .move-recommendation:hover { background: #e8f5e9; }
+        .move-recommendation small { color: #555; display: block; margin-top: 6px; line-height: 1.4; }
+        .error { color: #d32f2f; font-size: 0.9em; margin-top: 5px; }
+        .loading { color: #666; font-style: italic; }
+        .disclaimer { font-size: 0.8em; color: #777; margin-top: 20px; padding-top: 10px; border-top: 1px solid #eee; }
+    </style>
+</head>
+<body>
+
+    <!-- VISUAL LOADING SCREEN -->
+    <div id="splash-screen">
+        <div class="splash-icon">♞</div>
+        <div class="splash-title">Chess Analyzer</div>
+        <div class="splash-subtitle" id="splash-status">Initializing Engine...</div>
+        <div class="splash-loader"><div class="splash-loader-bar"></div></div>
+    </div>
+
+    <!-- MAIN APPLICATION -->
+    <div class="container">
+        <div class="board-container">
+            <div class="board-row">
+            <div id="board-wrap" style="position: relative; flex: 1 1 420px; max-width: 720px;">
+                <div id="myBoard" style="width: 100%;"></div>
+                <!-- SVG Arrow Overlay (sized to the board only) -->
+                <div id="arrow-overlay"></div>
+            </div>
+            <!-- Arrow colour legend -->
+            <div class="legend">
+                <div class="legend-title">Arrow Key</div>
+                <div class="legend-item"><span class="swatch" style="background:#4CAF50"></span><div><strong>Best move</strong><small id="legend-1">—</small></div></div>
+                <div class="legend-item"><span class="swatch" style="background:#FF9800"></span><div><strong>2nd best</strong><small id="legend-2">—</small></div></div>
+                <div class="legend-item"><span class="swatch" style="background:#2196F3"></span><div><strong>3rd best</strong><small id="legend-3">—</small></div></div>
+                <div class="legend-note">Arrows show on the board when Live Coach is enabled. Thicker = stronger.</div>
+            </div>
+            </div>
+            <div style="margin-top: 10px; text-align: center;">
+                <button onclick="flipBoard()">Flip Board</button>
+                <button onclick="resetBoard()">Reset to Start</button>
+                <button id="takeback-1" onclick="takeBack(1)" title="Take back the last move (asks first)">&#8630; Take back 1</button>
+                <button id="takeback-2" onclick="takeBack(2)" title="Take back your move and the reply (asks first)">&#8630;&#8630; Take back 2</button>
+                <button id="coach-toggle" class="coach-btn" onclick="toggleCoach()">Enable Live Coach</button>
+                <div style="margin-top:6px; font-size:13px;">
+                    <label>Coach me as:
+                        <select id="coach-side" onchange="analyzePosition(game.fen())">
+                            <option value="auto" selected>Auto (the side at the bottom of the board)</option>
+                            <option value="w">White only</option>
+                            <option value="b">Black only</option>
+                            <option value="both">Both sides</option>
+                        </select>
+                    </label>
+                </div>
+                <div style="margin-top:6px; font-size:13px;">
+                    <label>Think time per move:
+                        <select id="think-ms" onchange="analyzePosition(game.fen())">
+                            <option value="2000">Quick (2 s)</option>
+                            <option value="5000" selected>Strong (5 s)</option>
+                            <option value="15000">Maximum (15 s)</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="controls-container">
+            <h2>♟️ Chess Analyzer</h2>
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('fen')">Manual FEN</div>
+                <div class="tab" onclick="switchTab('image')">Upload Screenshot</div>
+                <div class="tab" onclick="switchTab('pgn')">Review PGN</div>
+                <div class="tab" onclick="switchTab('live')">Live Screen</div>
+            </div>
+
+            <div id="tab-live" class="tab-content">
+                <p style="margin-top:0"><strong>1.</strong> Share the window that shows the chess board (not this page).<br>
+                   <strong>2.</strong> Drag a box tightly around the board on the preview.<br>
+                   <strong>3.</strong> With the game at the <em>starting position</em>, click Calibrate.<br>
+                   <strong>4.</strong> Click Start Live &mdash; best-move arrows appear on the board.</p>
+                <button id="share-btn" onclick="startShare()">1. Share Screen</button>
+                <div id="live-stage"><video id="live-video" autoplay muted playsinline></video><div id="crop-box"></div><div id="crop-hint">Click and drag over the board</div></div>
+                <button onclick="drawBox()">2. Draw / Redraw Box</button>
+                <div id="live-view-wrap" style="display:none; margin-top:10px;">
+                    <div style="font-size:13px; color:#555; margin-bottom:4px;">Live view &mdash; what the app sees, with arrows. The faint grid lines should sit exactly on the board's squares; if not, click Draw / Redraw Box and include the whole board edge to edge.</div>
+                    <canvas id="live-view" width="480" height="480" style="width:100%; max-width:480px; border-radius:4px; background:#222;"></canvas>
+                </div>
+                <div style="margin:8px 0">
+                    <label>Board orientation on shared screen:
+                        <select id="live-orient" onchange="analyzePosition(game.fen())"><option value="0">White at bottom</option><option value="1">Black at bottom</option></select>
+                    </label>
+                </div>
+                <div style="margin:8px 0">
+                    <label>Side to move now (and if the board has to resync):
+                        <select id="live-turn"><option value="w">White</option><option value="b">Black</option></select>
+                    </label>
+                </div>
+                <div style="margin:8px 0">
+                    <label style="display:block; font-size:13px; margin-bottom:3px;">Position on screen <em>(leave blank if the game is at the starting position; otherwise paste the FEN, e.g. from Share &rarr; FEN)</em>:</label>
+                    <input type="text" id="live-placement" placeholder="rnb1kbnr/pppp1ppp/8/4p3/2P1P2q/8/PP1P1PPP/RNBQKBNR"
+                           style="width:100%; box-sizing:border-box; padding:6px; font-family:monospace; border:1px solid #ccc; border-radius:4px;">
+                </div>
+                <button onclick="calibrateLive()">3. Calibrate</button>
+                <button id="live-btn" onclick="toggleLive()">4. Start Live</button>
+                <p id="live-status" class="loading">Not sharing yet.</p>
+            </div>
+            
+            <div id="tab-fen" class="tab-content active">
+                <p>Enter a FEN string to analyze:</p>
+                <textarea id="fen-input" placeholder="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1">rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1</textarea>
+                <button onclick="loadFen()">Load & Analyze</button>
+            </div>
+            
+            <div id="tab-image" class="tab-content">
+                <p>Upload a clear, top-down screenshot of a chessboard. <em>Experimental: it finds the board and which squares are occupied, but you must correct the piece letters in the FEN box yourself. For real piece recognition use the Live Screen tab.</em></p>
+                <input type="file" id="image-input" accept="image/*" style="margin-bottom: 10px;">
+                <br>
+                <button onclick="analyzeImage()" id="img-btn">Analyze Image</button>
+                <p id="img-status" class="loading"></p>
+                <p class="error" id="img-error"></p>
+            </div>
+            
+            <div id="tab-pgn" class="tab-content">
+                <p>Paste a PGN to review the game:</p>
+                <textarea id="pgn-input" placeholder="[Event 'Example']&#10;1. e4 e5 2. Nf3 Nc6"></textarea>
+                <button onclick="loadPgn()">Load Game</button>
+                <div style="margin-top: 10px;">
+                    <button onclick="prevMove()">← Previous</button>
+                    <button onclick="nextMove()">Next →</button>
+                </div>
+            </div>
+            
+            <div class="analysis-panel">
+                <div class="eval-score" id="eval-text">Evaluation: Load a position to begin</div>
+                <h3>Top Recommended Moves<span id="engine-label" style="font-weight:normal; font-size:12px; color:#777;"></span></h3>
+                <div id="analysis-results">
+                    <p class="loading">Waiting for position...</p>
+                </div>
+            </div>
+            
+            <div class="disclaimer">
+                <strong>Disclaimer:</strong> This tool is for independent practice and post-game analysis only.
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script>
+        let board = null;
+        let game = new Chess();
+        let topMoves = [];
+        let currentFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+        let pgnHistory = [];
+        let currentPgnIndex = -1;
+        let coachMode = false;
+
+        // ---- Stockfish engine ----
+        let stockfish = null;
+        let engineReady = false;
+        let searching = false;
+        let pendingFen = null;
+        let paused = false;
+
+        function onDrop(source, target, piece) {
+            const isPawn = /^[wb]P$/.test(piece);
+            const isPromotionRank = (piece[0] === 'w' && target[1] === '8') || (piece[0] === 'b' && target[1] === '1');
+            let promotion = 'q';
+            if (isPawn && isPromotionRank) {
+                const promoPiece = prompt("Promote to (q, r, b, n):", "q");
+                if (['q', 'r', 'b', 'n'].includes(promoPiece)) promotion = promoPiece;
+            }
+            const move = game.move({ from: source, to: target, promotion: promotion });
+            if (move === null) return 'snapback';
+            board.position(game.fen());
+            analyzePosition(game.fen());
+        }
+
+        const config = {
+            draggable: true,
+            position: 'start',
+            pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+            onDrop: onDrop
+        };
+        board = Chessboard('myBoard', config);
+
+        let engineInitToken = 0, engineBlobUrl = null, engineLabel = '';
+
+        function engineFailed(msg) {
+            engineReady = false; searching = false;
+            document.getElementById('splash-screen').classList.add('splash-hidden');   // never trap the UI behind the splash
+            document.getElementById('eval-text').innerText = 'Engine unavailable';
+            document.getElementById('analysis-results').innerHTML = '<p class="error">' + msg + '</p>';
+        }
+
+        // Which side gets advice: 'w', 'b' or 'both'. Auto = the side shown at the bottom of the board
+        // (the shared board when Live Screen is in use, otherwise this page's board).
+        function coachSide() {
+            const v = document.getElementById('coach-side').value;
+            if (v !== 'auto') return v;
+            if (liveStream) return document.getElementById('live-orient').value === '1' ? 'b' : 'w';
+            return board && board.orientation() === 'black' ? 'b' : 'w';
+        }
+
+        function thinkMs() { return parseInt(document.getElementById('think-ms').value, 10) || 5000; }
+
+        // Arrows are only trusted once the search is deep enough (early iterations are noisy).
+        function arrowsReady() {
+            const t = topMoves[0];
+            return !!t && (t.depth >= 10 || Math.abs(t.rawScore) >= 9000);
+        }
+
+        let uiTimer = null;
+        function scheduleUI() {
+            if (uiTimer) return;
+            uiTimer = setTimeout(() => {
+                uiTimer = null;
+                if (!topMoves.some(Boolean)) return;
+                updateAnalysisUI();
+                if (coachMode) drawArrows();
+            }, 150);
+        }
+
+        async function initEngine() {
+            const token = ++engineInitToken;
+            const splashStatus = document.getElementById('splash-status');
+            engineReady = false;
+            let worker = null;
+            try {
+                // Prefer a locally installed Stockfish 16 (engine/ folder); otherwise use the CDN Stockfish 10.
+                let local = false;
+                try { local = (await fetch('engine/stockfish-nnue-16-single.js', { method: 'HEAD' })).ok; } catch (e) {}
+                if (token !== engineInitToken) return;
+                if (local) {
+                    worker = new Worker('engine/stockfish-nnue-16-single.js');
+                    engineLabel = 'Stockfish 16';
+                } else {
+                    if (engineBlobUrl) URL.revokeObjectURL(engineBlobUrl);
+                    const loader = "importScripts('https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.0/stockfish.js');";
+                    engineBlobUrl = URL.createObjectURL(new Blob([loader], { type: 'text/javascript' }));
+                    worker = new Worker(engineBlobUrl);
+                    engineLabel = 'Stockfish 10';
+                }
+            } catch (e) { engineFailed('Could not start the engine: ' + e.message); return; }
+            stockfish = worker;
+            splashStatus.innerText = 'Starting ' + engineLabel + '...';
+
+            const timeout = setTimeout(() => {
+                if (token === engineInitToken && !engineReady)
+                    engineFailed('The engine did not start within 20 seconds. If it loads from the internet, check your connection and reload the page.');
+            }, 20000);
+            worker.onerror = (e) => {
+                clearTimeout(timeout);
+                if (token === engineInitToken) engineFailed('The engine failed to load' + (e && e.message ? ': ' + e.message : '.'));
+            };
+
+            worker.onmessage = function (event) {
+                if (token !== engineInitToken) return;
+                const line = typeof event.data === 'string' ? event.data : '';
+                if (line === 'uciok') { splashStatus.innerText = "Configuring Engine..."; worker.postMessage('isready'); return; }
+                if (line === 'readyok') {
+                    clearTimeout(timeout);
+                    worker.postMessage('setoption name MultiPV value 3');
+                    worker.postMessage('setoption name Hash value 64');
+                    engineReady = true;
+                    const lbl = document.getElementById('engine-label');
+                    if (lbl) lbl.innerText = ' \u00b7 ' + engineLabel;
+                    document.getElementById('splash-screen').classList.add('splash-hidden');
+                    analyzePosition(game.fen());
+                    return;
+                }
+
+                if (line.startsWith('bestmove')) {
+                    searching = false;
+                    if (pendingFen) startSearch(pendingFen); else scheduleUI();
+                    return;
+                }
+                // Ignore any info lines that belong to a search we've already replaced
+                if (pendingFen || paused) return;
+
+                if (line.startsWith('info') && line.includes('multipv') && line.includes('score')) {
+                    const multipvMatch = line.match(/multipv (\d+)/);
+                    const scoreMatch = line.match(/score (cp|mate) (-?\d+)/);
+                    const depthMatch = line.match(/ depth (\d+)/);
+                    // Split by ' pv ' to avoid accidentally matching 'multipv'
+                    const pvParts = line.split(' pv ');
+
+                    if (multipvMatch && scoreMatch && pvParts.length > 1) {
+                        const pvIndex = parseInt(multipvMatch[1]);
+                        if (pvIndex <= 3) {
+                            const scoreType = scoreMatch[1];
+                            const scoreValue = parseInt(scoreMatch[2]);
+                            const pvMoves = pvParts[1].trim().split(/\s+/);
+                            let scoreText;
+                            if (scoreType === 'mate') scoreText = scoreValue > 0 ? 'Mate in ' + scoreValue : 'Mated in ' + Math.abs(scoreValue);
+                            else scoreText = (scoreValue / 100).toFixed(2);
+                            topMoves[pvIndex - 1] = {
+                                move: pvMoves[0],
+                                score: scoreText,
+                                rawScore: scoreType === 'cp' ? scoreValue : (scoreValue > 0 ? 10000 : -10000),
+                                depth: depthMatch ? parseInt(depthMatch[1]) : 0,
+                                pv: pvMoves
+                            };
+                            scheduleUI();
+                        }
+                    }
+                }
+            };
+            worker.postMessage('uci');
+        }
+
+        function analyzePosition(fen) {
+            currentFen = fen;
+            topMoves = [];
+            clearArrows();
+            for (let i = 1; i <= 3; i++) document.getElementById('legend-' + i).innerText = '—';
+            pushOverlay();
+
+            // Never send an impossible position to the engine (Stockfish can hang on it)
+            const placementOnly = fen.split(' ')[0];
+            if ((placementOnly.match(/K/g) || []).length !== 1 || (placementOnly.match(/k/g) || []).length !== 1) {
+                paused = true;
+                pendingFen = null;
+                if (stockfish && searching) stockfish.postMessage('stop');
+                document.getElementById('eval-text').innerText = 'Evaluation: invalid position';
+                document.getElementById('analysis-results').innerHTML = '<p class="error">Invalid position: each side needs exactly one king.</p>';
+                return;
+            }
+
+            // Only coach the chosen side: don't analyse (or draw arrows) on the opponent's turn
+            const side = coachSide();
+            if (side !== 'both' && fen.split(' ')[1] !== side) {
+                const you = side === 'w' ? 'White' : 'Black', opp = side === 'w' ? 'Black' : 'White';
+                paused = true;
+                pendingFen = null;
+                if (stockfish && searching) stockfish.postMessage('stop');
+                document.getElementById('eval-text').innerText = 'Evaluation: ' + opp + ' to move';
+                document.getElementById('analysis-results').innerHTML =
+                    '<p class="loading">' + opp + ' to move &mdash; ' + opp + ' decides on its own. Advice returns on ' + you + '\'s turn.</p>';
+                return;
+            }
+            paused = false;
+            document.getElementById('analysis-results').innerHTML = '<p class="loading">Engine is thinking...</p>';
+            if (!stockfish || !engineReady) return;
+            if (searching) {
+                // Wait for the old search's 'bestmove' so stale lines can't pollute this position
+                pendingFen = fen;
+                stockfish.postMessage('stop');
+                // Watchdog: if the engine never answers 'stop', restart it
+                setTimeout(() => { if (searching && pendingFen === fen) restartEngine(); }, 3000);
+            } else {
+                startSearch(fen);
+            }
+        }
+
+        function restartEngine() {
+            try { stockfish.terminate(); } catch (e) {}
+            engineReady = false; searching = false;
+            initEngine();   // re-analyses the current position once ready
+        }
+
+        function startSearch(fen) {
+            searching = true;
+            pendingFen = null;
+            stockfish.postMessage('position fen ' + fen);
+            stockfish.postMessage('go movetime ' + thinkMs());
+        }
+
+        // --- ARROW DRAWING SYSTEM ---
+        function squareToCoords(square) {
+            const file = square.charCodeAt(0) - 97; // a=0, b=1, ... h=7
+            const rank = parseInt(square[1]) - 1;   // 1=0, 2=1, ... 8=7
+            return { file, rank };
+        }
+
+        // Square centre in pixels, relative to the board wrapper.
+        // origin = top-left of the playable squares (inside chessboard.js's border).
+        function coordsToPixel(file, rank, origin, sq, orientation) {
+            const col = orientation === 'white' ? file : 7 - file;
+            const row = orientation === 'white' ? 7 - rank : rank;
+            return { x: origin.x + col * sq + sq / 2, y: origin.y + row * sq + sq / 2 };
+        }
+
+        function drawArrows() {
+            clearArrows();
+            if (!arrowsReady() || topMoves[0].move.length < 4) return;
+
+            const wrap = document.getElementById('board-wrap');
+            const overlay = document.getElementById('arrow-overlay');
+            const inner = document.querySelector('#myBoard .board-b72b1');
+            if (!inner) return;
+
+            // Measure the real playable grid (excludes the board's border)
+            const wrapRect = wrap.getBoundingClientRect();
+            const innerRect = inner.getBoundingClientRect();
+            const sq = inner.clientWidth / 8;
+            const origin = {
+                x: innerRect.left - wrapRect.left + inner.clientLeft,
+                y: innerRect.top - wrapRect.top + inner.clientTop
+            };
+            const orientation = board.orientation();
+
+            const colors = ['#4CAF50', '#FF9800', '#2196F3']; // Green, Orange, Blue
+            const opacities = [0.85, 0.6, 0.45];
+
+            let svg = `<svg width="${wrapRect.width}" height="${wrapRect.height}" viewBox="0 0 ${wrapRect.width} ${wrapRect.height}" xmlns="http://www.w3.org/2000/svg">`;
+
+            // Draw lowest-ranked first so the best move ends up on top
+            for (let i = Math.min(3, topMoves.length) - 1; i >= 0; i--) {
+                const m = topMoves[i];
+                if (!m || m.move.length < 4) continue;
+
+                const from = squareToCoords(m.move.substring(0, 2));
+                const to = squareToCoords(m.move.substring(2, 4));
+                const p1 = coordsToPixel(from.file, from.rank, origin, sq, orientation);
+                const p2 = coordsToPixel(to.file, to.rank, origin, sq, orientation);
+
+                const dx = p2.x - p1.x, dy = p2.y - p1.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist === 0) continue;
+                const ux = dx / dist, uy = dy / dist;
+
+                const width = sq * (0.22 - i * 0.04);   // shaft thickness
+                const headLen = sq * 0.38;
+                const headHalf = sq * 0.24;
+
+                // Shaft ends where the arrowhead base begins; tip sits at the target square centre
+                const baseX = p2.x - ux * headLen;
+                const baseY = p2.y - uy * headLen;
+                const px = -uy, py = ux; // perpendicular
+
+                svg += `<g opacity="${opacities[i]}" fill="${colors[i]}" stroke="${colors[i]}">
+                    <line x1="${p1.x}" y1="${p1.y}" x2="${baseX}" y2="${baseY}" stroke-width="${width}" stroke-linecap="round"/>
+                    <polygon stroke="none" points="${p2.x},${p2.y} ${baseX + px * headHalf},${baseY + py * headHalf} ${baseX - px * headHalf},${baseY - py * headHalf}"/>
+                </g>`;
+            }
+
+            svg += '</svg>';
+            overlay.innerHTML = svg;
+        }
+
+        function clearArrows() {
+            document.getElementById('arrow-overlay').innerHTML = '';
+        }
+
+        // --- LIVE COACH FEATURES ---
+        function toggleCoach() {
+            coachMode = !coachMode;
+            const btn = document.getElementById('coach-toggle');
+            if (coachMode) {
+                btn.innerText = "Disable Live Coach";
+                btn.classList.add('active');
+                if (topMoves[0]) drawArrows();
+            } else {
+                btn.innerText = "Enable Live Coach";
+                btn.classList.remove('active');
+                clearArrows();
+            }
+        }
+
+        function generateExplanation(moveUci, fen) {
+            const tempGame = new Chess(fen);
+            const from = moveUci.substring(0, 2);
+            const to = moveUci.substring(2, 4);
+            const promotion = moveUci.length > 4 ? moveUci.substring(4, 5) : undefined;
+            const moveObj = tempGame.move({ from, to, promotion });
+            if (!moveObj) return "Invalid move.";
+            let reasons = [];
+            if (moveObj.flags.includes('c') || moveObj.flags.includes('e')) {
+                const pieceName = moveObj.captured === 'p' ? 'pawn' : moveObj.captured + ' piece';
+                reasons.push(`Captures the opponent's ${pieceName}.`);
+            }
+            if (tempGame.in_check()) reasons.push("Delivers a check to the opponent's king.");
+            if (moveObj.flags.includes('k') || moveObj.flags.includes('q')) reasons.push("Safely castles, connecting rooks and protecting the king.");
+            if (reasons.length === 0) reasons.push("Improves piece activity and maintains a solid position.");
+            tempGame.undo();
+            return reasons.join(" ");
+        }
+
+        function updateAnalysisUI() {
+            const container = document.getElementById('analysis-results');
+            container.innerHTML = '';
+            const turn = game.turn() === 'w' ? 'White' : 'Black';
+            if (topMoves[0]) {
+                const score = topMoves[0].rawScore;
+                let evalText = "";
+                if (Math.abs(score) >= 9000) evalText = `Decisive advantage for ${score > 0 ? turn : (turn === 'White' ? 'Black' : 'White')}.`;
+                else if (score > 100) evalText = `${turn} has a clear advantage.`;
+                else if (score > 20) evalText = `${turn} is slightly better.`;
+                else if (score > -20) evalText = "The position is roughly equal.";
+                else if (score > -100) evalText = `${turn === 'White' ? 'Black' : 'White'} is slightly better.`;
+                else evalText = `${turn === 'White' ? 'Black' : 'White'} has a clear advantage.`;
+                document.getElementById('eval-text').innerText = `Evaluation: ${evalText} (${topMoves[0].score}) · depth ${topMoves[0].depth || '?'}`;
+            }
+            for (let i = 1; i <= 3; i++) {
+                const t = topMoves[i - 1];
+                document.getElementById('legend-' + i).innerText = t ? `${t.move} (${t.score})` : '—';
+            }
+            pushOverlay();
+            topMoves.forEach((item, index) => {
+                if (!item) return;
+                const explanation = generateExplanation(item.move, currentFen);
+                const div = document.createElement('div');
+                div.className = 'move-recommendation';
+                div.innerHTML = `<strong>${index + 1}. ${item.move} (Eval: ${item.score})</strong><br><small>${explanation}</small>`;
+                div.onclick = () => {
+                    if (liveTimer) return;   // in live mode the board follows the screen, not clicks
+                    const from = item.move.substring(0, 2);
+                    const to = item.move.substring(2, 4);
+                    const promotion = item.move.length > 4 ? item.move.substring(4, 5) : undefined;
+                    if (!game.move({ from, to, promotion })) return;
+                    board.position(game.fen());
+                    analyzePosition(game.fen());
+                };
+                container.appendChild(div);
+            });
+        }
+
+        // ---- Installable app (PWA) and phone support ----
+        if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+            navigator.serviceWorker.register('sw.js').catch(() => {});
+        }
+        // Screen sharing doesn't exist on phone browsers, and the screenshot reader / live reader need the
+        // Python server. Hide those tabs when they can't work (analysis, PGN and take-back still do).
+        (async function hideUnavailableTabs() {
+            const hide = name => {
+                document.querySelectorAll('.tab').forEach(t => {
+                    if ((t.getAttribute('onclick') || '').includes("'" + name + "'")) t.style.display = 'none';
+                });
+            };
+            if (!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)) hide('live');
+            try {
+                const r = await fetch('api/overlay-state');
+                if (r.status === 404) { hide('live'); hide('image'); }   // static hosting: no Python server
+            } catch (e) { /* server just not reachable right now: leave the tabs */ }
+        })();
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tabName).classList.add('active');
+        }
+        function loadFen() {
+            const fen = document.getElementById('fen-input').value.trim();
+            if (game.load(fen)) { board.position(fen); analyzePosition(fen); } 
+            else { alert("Invalid FEN string."); }
+        }
+        function flipBoard() { board.flip(); if (coachMode) setTimeout(drawArrows, 100); }
+        // Take back the last `plies` half-moves of the game on this page, after asking.
+        function takeBack(plies, skipConfirm) {
+            if (liveTimer) {
+                alert('Live mode follows the board on your screen, so take the move back on your chess site.\n\n' +
+                      'The app notices take-backs by itself and rewinds to match.');
+                return;
+            }
+            const hist = game.history();
+            if (hist.length === 0) { alert('There is nothing to take back.'); return; }
+            const n = Math.min(plies, hist.length);
+            const undoing = hist.slice(-n).join(' ');
+            const question = n === 1 ? `Take back the last move (${undoing})?` : `Take back the last ${n} moves (${undoing})?`;
+            if (!skipConfirm && !confirm(question)) return;
+            for (let i = 0; i < n; i++) game.undo();
+            board.position(game.fen());
+            analyzePosition(game.fen());
+        }
+
+        function resetBoard() { game.reset(); board.start(); analyzePosition(game.fen()); }
+        
+        async function analyzeImage() {
+            const fileInput = document.getElementById('image-input');
+            if (!fileInput.files.length) { document.getElementById('img-error').innerText = "Please select an image first."; return; }
+            const btn = document.getElementById('img-btn');
+            const status = document.getElementById('img-status');
+            const error = document.getElementById('img-error');
+            btn.disabled = true; status.innerText = "Processing..."; error.innerText = "";
+            const formData = new FormData();
+            formData.append('image', fileInput.files[0]);
+            try {
+                const response = await fetch('/api/analyze-image', { method: 'POST', body: formData });
+                const data = await response.json();
+                if (response.ok) {
+                    status.innerText = data.message;
+                    document.getElementById('fen-input').value = data.fen;
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.tab')[0].classList.add('active');
+                    document.getElementById('tab-fen').classList.add('active');
+                } else { error.innerText = data.error; status.innerText = ""; }
+            } catch (err) { error.innerText = "Failed to connect to backend."; status.innerText = ""; } 
+            finally { btn.disabled = false; }
+        }
+        function loadPgn() {
+            const pgn = document.getElementById('pgn-input').value;
+            if (game.load_pgn(pgn)) {
+                pgnHistory = game.history({ verbose: true }); game.reset(); board.position(game.fen()); currentPgnIndex = -1; analyzePosition(game.fen());
+                alert("Game loaded! Use Next/Previous to navigate.");
+            } else { alert("Invalid PGN format."); }
+        }
+        function nextMove() {
+            if (currentPgnIndex < pgnHistory.length - 1) { currentPgnIndex++; game.move(pgnHistory[currentPgnIndex]); board.position(game.fen()); analyzePosition(game.fen()); }
+        }
+        function prevMove() {
+            if (currentPgnIndex >= 0) { game.undo(); currentPgnIndex--; board.position(game.fen()); analyzePosition(game.fen()); }
+        }
+
+        // --- LIVE SCREEN MODE ---
+        let liveStream = null, selFrac = null, liveTimer = null, liveBusy = false;
+        let liveCalibrated = false, lastSeen = null, seenCount = 0;
+        let liveFails = 0, unreadable = 0, failedSearch = null;
+        let boardChanging = false;   // the screen no longer matches the tracked game: hide arrows until resolved
+        let liveSynced = true, liveBanner = { text: 'NOT LIVE — click Start Live', kind: 'bad' };
+
+        function setLiveStatus(msg) { document.getElementById('live-status').innerText = msg; }
+
+        async function startShare() {
+            if (liveStream) { liveStream.getTracks().forEach(t => { t.onended = null; t.stop(); }); stopLive(); }
+            try {
+                liveStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+            } catch (e) { setLiveStatus('Screen share was cancelled or blocked.'); return; }
+            document.getElementById('live-video').srcObject = liveStream;
+            liveStream.getVideoTracks()[0].onended = () => { stopLive(); setLiveStatus('Screen share ended.'); };
+            drawBox();
+            if (!liveViewRunning) { liveViewRunning = true; requestAnimationFrame(renderLiveView); }
+        }
+
+        // Publish the current top moves so the desktop overlay (overlay.py) can draw them.
+        // A heartbeat keeps them fresh; the overlay clears itself if the heartbeat stops.
+        let overlayTimer = null;
+        function postOverlay() {
+            // No arrows when paused (Black's turn), unsynced, not ready, coach off, or Live stopped
+            const hide = paused || !liveSynced || boardChanging || !coachMode || !arrowsReady() || (liveStream && !liveTimer);
+            const moves = (hide ? [] : topMoves).filter(Boolean).slice(0, 3).map(m => m.move);
+            fetch('/api/overlay-state', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ moves, flipped: document.getElementById('live-orient').value === '1', fen: currentFen })
+            }).catch(() => {});
+        }
+        function pushOverlay() {
+            clearTimeout(overlayTimer);
+            overlayTimer = setTimeout(postOverlay, 120);
+        }
+        setInterval(postOverlay, 1500);
+
+        // Mirror of the selected board region with the engine's arrows drawn on top
+        let calibFail = null, liveViewRunning = false;
+
+        function renderLiveView() {
+            const v = document.getElementById('live-video');
+            const cv = document.getElementById('live-view');
+            if (!liveStream || !liveStream.active) { liveViewRunning = false; return; }
+            const wrap = document.getElementById('live-view-wrap');
+            if (selFrac && v.videoWidth) {
+                wrap.style.display = 'block';
+                const S = cv.width, ctx = cv.getContext('2d');
+                ctx.globalAlpha = 1;
+                ctx.drawImage(v, selFrac.x * v.videoWidth, selFrac.y * v.videoHeight,
+                    selFrac.w * v.videoWidth, selFrac.h * v.videoHeight, 0, 0, S, S);
+                const flipped = document.getElementById('live-orient').value === '1';
+                const sq = S / 8;
+                const centre = (sqName) => {
+                    const f = sqName.charCodeAt(0) - 97, r = parseInt(sqName[1]) - 1;
+                    const col = flipped ? 7 - f : f, row = flipped ? r : 7 - r;
+                    return { x: col * sq + sq / 2, y: row * sq + sq / 2 };
+                };
+                const colors = ['#4CAF50', '#FF9800', '#2196F3'];
+                const alphas = [0.9, 0.7, 0.55];
+                const showArrows = !!liveTimer && liveSynced && !boardChanging && !paused && coachMode && arrowsReady();
+                for (let i = showArrows ? Math.min(3, topMoves.length) - 1 : -1; i >= 0; i--) {
+                    const m = topMoves[i];
+                    if (!m || m.move.length < 4) continue;
+                    const p1 = centre(m.move.substring(0, 2)), p2 = centre(m.move.substring(2, 4));
+                    const dx = p2.x - p1.x, dy = p2.y - p1.y, d = Math.hypot(dx, dy);
+                    if (!d) continue;
+                    const ux = dx / d, uy = dy / d;
+                    const headLen = sq * 0.38, headHalf = sq * 0.24;
+                    const bx = p2.x - ux * headLen, by = p2.y - uy * headLen;
+                    ctx.globalAlpha = alphas[i];
+                    ctx.strokeStyle = ctx.fillStyle = colors[i];
+                    ctx.lineWidth = sq * (0.22 - i * 0.04);
+                    ctx.lineCap = 'round';
+                    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(bx, by); ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(p2.x, p2.y);
+                    ctx.lineTo(bx - uy * headHalf, by + ux * headHalf);
+                    ctx.lineTo(bx + uy * headHalf, by - ux * headHalf);
+                    ctx.closePath(); ctx.fill();
+                }
+                ctx.globalAlpha = 1;
+                // faint grid: if it doesn't line up with the squares, redraw the box
+                ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                for (let i = 0; i <= 8; i++) {
+                    ctx.moveTo(i * sq, 0); ctx.lineTo(i * sq, S);
+                    ctx.moveTo(0, i * sq); ctx.lineTo(S, i * sq);
+                }
+                ctx.stroke();
+                // status banner (so a stale or stopped feed is never mistaken for live advice)
+                const bannerColors = { ok: '#2e7d32', warn: '#ef6c00', bad: '#c62828' };
+                ctx.font = 'bold 15px Segoe UI, sans-serif';
+                const tw = ctx.measureText(liveBanner.text).width + 20;
+                ctx.fillStyle = bannerColors[liveBanner.kind] || '#333';
+                ctx.fillRect(8, 8, tw, 26);
+                ctx.fillStyle = '#fff';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(liveBanner.text, 18, 21);
+                if (calibFail && Date.now() < calibFail.until) {
+                    ctx.strokeStyle = '#e53935'; ctx.lineWidth = 4;
+                    const row = flipped ? 7 - calibFail.row : calibFail.row;
+                    const col = flipped ? 7 - calibFail.col : calibFail.col;
+                    ctx.strokeRect(col * sq + 2, row * sq + 2, sq - 4, sq - 4);
+                }
+            }
+            requestAnimationFrame(renderLiveView);
+        }
+
+        function drawBox() {
+            if (!liveStream) { setLiveStatus('Click "1. Share Screen" first.'); return; }
+            selFrac = null;
+            document.getElementById('crop-box').style.display = 'none';
+            document.getElementById('crop-hint').style.display = 'block';
+            setLiveStatus('Click and drag on the preview, corner to corner of the chess board.');
+        }
+
+        (function setupCrop() {
+            const stage = document.getElementById('live-stage');
+            const box = document.getElementById('crop-box');
+            let start = null;
+            const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+            function rectFrom(e) {
+                const r = stage.getBoundingClientRect();
+                const x = clamp(e.clientX - r.left, 0, r.width), y = clamp(e.clientY - r.top, 0, r.height);
+                // keep the selection square
+                let dx = x - start.x, dy = y - start.y;
+                const side = Math.max(Math.abs(dx), Math.abs(dy));
+                dx = Math.sign(dx || 1) * side; dy = Math.sign(dy || 1) * side;
+                const x2 = clamp(start.x + dx, 0, r.width), y2 = clamp(start.y + dy, 0, r.height);
+                const s = Math.min(Math.abs(x2 - start.x), Math.abs(y2 - start.y));
+                const left = dx < 0 ? start.x - s : start.x, top = dy < 0 ? start.y - s : start.y;
+                return { left, top, size: s, r };
+            }
+            stage.addEventListener('pointerdown', e => {
+                const r = stage.getBoundingClientRect();
+                start = { x: e.clientX - r.left, y: e.clientY - r.top };
+                stage.setPointerCapture(e.pointerId);
+            });
+            stage.addEventListener('pointermove', e => {
+                if (!start) return;
+                const { left, top, size } = rectFrom(e);
+                Object.assign(box.style, { display: 'block', left: left + 'px', top: top + 'px', width: size + 'px', height: size + 'px' });
+            });
+            stage.addEventListener('pointerup', e => {
+                if (!start) return;
+                const { left, top, size, r } = rectFrom(e);
+                start = null;
+                if (size < 40) { box.style.display = 'none'; selFrac = null; document.getElementById('crop-hint').style.display = 'block'; return; }
+                selFrac = { x: left / r.width, y: top / r.height, w: size / r.width, h: size / r.height };
+                document.getElementById('crop-hint').style.display = 'none';
+                setLiveStatus('Board selected. Put the game at the starting position, then click Calibrate.');
+            });
+        })();
+
+        function captureBoardBlob() {
+            const v = document.getElementById('live-video');
+            if (!selFrac || !v.videoWidth) return Promise.resolve(null);
+            const c = document.createElement('canvas');
+            c.width = c.height = 512;
+            c.getContext('2d').drawImage(v,
+                selFrac.x * v.videoWidth, selFrac.y * v.videoHeight,
+                selFrac.w * v.videoWidth, selFrac.h * v.videoHeight, 0, 0, 512, 512);
+            return new Promise(res => c.toBlob(res, 'image/png'));
+        }
+
+        async function postFrame(url, extra = {}) {
+            const blob = await captureBoardBlob();
+            if (!blob) return { ok: false, data: { error: 'Share your screen and select the board first.' } };
+            const fd = new FormData();
+            fd.append('image', blob, 'board.png');
+            fd.append('black_at_bottom', document.getElementById('live-orient').value);
+            for (const [k, v] of Object.entries(extra)) fd.append(k, v);
+            const res = await fetch(url, { method: 'POST', body: fd });
+            let data;
+            try { data = await res.json(); } catch (e) { data = { error: 'Server error (' + res.status + ')' }; }
+            return { ok: res.ok, data };
+        }
+
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const START_PLACEMENT = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR';
+
+        async function calibrateLive() {
+            setLiveStatus('Calibrating...');
+            try {
+                let placement = document.getElementById('live-placement').value.trim().split(' ')[0];
+                let note = '', ok = false, data = null, verified = false;
+                // Shared video is blurry for a moment after it starts or changes. So: wait a beat, calibrate,
+                // then confirm the result by reading a DIFFERENT, fresh frame. Retry if the two disagree.
+                for (let attempt = 0; attempt < 3 && !verified; attempt++) {
+                    await sleep(attempt === 0 ? 600 : 900);
+                    ({ ok, data } = await postFrame('/api/calibrate', { placement }));
+                    // A typed position that doesn't match the board (e.g. an old FEN left in the box):
+                    // fall back to the starting position before giving up.
+                    if (!ok && placement && data.row !== undefined) {
+                        const retry = await postFrame('/api/calibrate', { placement: '' });
+                        if (retry.ok) {
+                            ok = true; data = retry.data; placement = '';
+                            document.getElementById('live-placement').value = '';
+                            note = ' (The position you typed did not match the board, so I used the starting position.)';
+                        }
+                    }
+                    if (!ok) break;   // a definite problem, not just blur: report it below
+                    await sleep(700);
+                    const v = await postFrame('/api/live-frame');
+                    verified = v.ok && v.data.placement === (placement || START_PLACEMENT) && v.data.confidence >= 0.7;
+                    if (!verified && attempt < 2) setLiveStatus('The picture is still settling - calibrating again...');
+                }
+                if (!ok) {
+                    if (data.row !== undefined) calibFail = { row: data.row, col: data.col, until: Date.now() + 6000 };
+                    setLiveStatus(data.error);
+                    return;
+                }
+                if (!verified) {
+                    setLiveStatus('Calibrated, but a fresh frame did not read back the same, so the picture is probably too blurry or too small. Share a larger window / zoom the board, redraw the box tightly, and try again.');
+                    return;
+                }
+                liveCalibrated = true;
+                lastSeen = null; seenCount = 0;
+                const turn = document.getElementById('live-turn').value;
+                const built = buildGame(placement || START_PLACEMENT, turn);
+                if (built) game = built.game; else game.reset();
+                failedSearch = null; liveFails = 0; unreadable = 0; boardChanging = false;
+                board.orientation(document.getElementById('live-orient').value === '1' ? 'black' : 'white');
+                board.position(game.fen());
+                analyzePosition(game.fen());
+                setLiveStatus(data.message + note);
+                if (!liveTimer) startLive();
+            } catch (e) { setLiveStatus('Failed to connect to backend (is app.py running?).'); }
+        }
+
+        function toggleLive() { liveTimer ? stopLive() : startLive(); }
+
+        function startLive() {
+            if (!liveCalibrated) { setLiveStatus('Click Calibrate first — the app has to learn how the pieces look on your chess site. If the game is already under way, paste the position (FEN) in the box above first.'); return; }
+            liveTimer = setInterval(liveTick, 700);
+            liveSynced = true;
+            setBanner('LIVE · starting...', 'ok');
+            document.getElementById('live-btn').innerText = 'Stop Live';
+            if (!coachMode) toggleCoach();
+            setLiveStatus('Live: watching the board...');
+        }
+
+        function stopLive() {
+            clearInterval(liveTimer); liveTimer = null;
+            setBanner('NOT LIVE — click Start Live', 'bad');
+            pushOverlay();
+            document.getElementById('live-btn').innerText = '4. Start Live';
+        }
+
+        function markUnsynced(text) {
+            liveSynced = false;
+            topMoves = []; clearArrows(); pushOverlay();
+            setBanner(text, 'bad');
+        }
+
+        function noteLiveFailure(msg) {
+            liveFails++;
+            setLiveStatus(msg || 'Live: error talking to the app.');
+            if (liveFails >= 3) {
+                if (/not calibrated/i.test(msg || '')) { liveCalibrated = false; markUnsynced('Needs recalibration \u2014 click Calibrate'); }
+                else markUnsynced('App server not responding');
+            }
+        }
+
+        async function liveTick() {
+            if (liveBusy) return;
+            liveBusy = true;
+            try {
+                const { ok, data } = await postFrame('/api/live-frame');
+                if (!liveTimer) return;   // stopped while the request was in flight
+                if (!ok) { noteLiveFailure(data && data.error); return; }
+                liveFails = 0;
+                if (data.placement == null) {
+                    // low-confidence frame (arrow drawn by the site, mid-animation, board covered...)
+                    unreadable++;
+                    setLiveStatus('Live: frame not clear enough to read (' + unreadable + ').');
+                    if (unreadable >= 3) markUnsynced("Can't read the board reliably \u2014 check the box");
+                    return;
+                }
+                unreadable = 0;
+                handlePlacement(data.placement, data.confidence);
+            } catch (e) { noteLiveFailure('Lost connection to the app server.'); }
+            finally { liveBusy = false; }
+        }
+
+        function expandPlacement(p) {
+            const out = [];
+            for (const ch of p.replace(/\//g, '')) {
+                if (/\d/.test(ch)) for (let k = 0; k < +ch; k++) out.push('');
+                else out.push(ch);
+            }
+            return out;
+        }
+
+        // Reject boards that can't be real (e.g. a misread frame with no kings)
+        function plausiblePlacement(p) {
+            const cells = expandPlacement(p);
+            if (cells.length !== 64) return false;
+            const cnt = {};
+            cells.forEach(x => { if (x) cnt[x] = (cnt[x] || 0) + 1; });
+            if (cnt.K !== 1 || cnt.k !== 1) return false;
+            if ((cnt.P || 0) > 8 || (cnt.p || 0) > 8) return false;
+            for (let i = 0; i < 8; i++) {
+                if ('Pp'.includes(cells[i] || '-') || 'Pp'.includes(cells[56 + i] || '-')) return false;
+            }
+            const sum = s => [...s].reduce((a, x) => a + (cnt[x] || 0), 0);
+            return sum('KQRBNP') <= 16 && sum('kqrbnp') <= 16;
+        }
+
+        // Castling rights that are still possible given where the kings and rooks stand.
+        function castlingFor(placement) {
+            const c = expandPlacement(placement);
+            const at = (file, rank) => c[(8 - rank) * 8 + file];
+            let r = '';
+            if (at(4, 1) === 'K') { if (at(7, 1) === 'R') r += 'K'; if (at(0, 1) === 'R') r += 'Q'; }
+            if (at(4, 8) === 'k') { if (at(7, 8) === 'r') r += 'k'; if (at(0, 8) === 'r') r += 'q'; }
+            return r || '-';
+        }
+
+        // Build a game from a placement. Tries the chosen side to move, then the other, and rejects
+        // positions where the side that just moved is in check (illegal; Stockfish can hang on them).
+        function buildGame(placement, turn) {
+            if (!plausiblePlacement(placement)) return null;
+            for (const t of [turn, turn === 'w' ? 'b' : 'w']) {
+                const g = new Chess();
+                if (!g.load(placement + ' ' + t + ' ' + castlingFor(placement) + ' - 0 1')) continue;
+                const other = t === 'w' ? 'b' : 'w';
+                const probe = new Chess();
+                if (probe.load(placement + ' ' + other + ' - - 0 1') && probe.in_check()) continue;
+                return { game: g, turn: t };
+            }
+            return null;
+        }
+
+        // Find up to maxPlies legal moves that turn the tracked game into `target`.
+        // Only moves that start on a square that differs (or continue a piece already moved) are tried.
+        function findMoveSequence(target, maxPlies) {
+            const cur = expandPlacement(game.fen().split(' ')[0]);
+            const tgt = expandPlacement(target);
+            const diff = new Set();
+            for (let k = 0; k < 64; k++) if (cur[k] !== tgt[k]) {
+                diff.add('abcdefgh'[k % 8] + (8 - Math.floor(k / 8)));
+            }
+            if (diff.size > 8) return null;   // too different to be a few moves; avoids a long search on a misread frame
+            const seq = [];
+            function dfs(depth, tos) {
+                if (depth === 0) return false;
+                for (const m of game.moves({ verbose: true })) {
+                    if (!diff.has(m.from) && !tos.has(m.from)) continue;
+                    game.move({ from: m.from, to: m.to, promotion: m.promotion });
+                    seq.push(m.san);
+                    if (game.fen().split(' ')[0] === target) return true;
+                    const next = new Set(tos); next.add(m.to);
+                    if (dfs(depth - 1, next)) return true;
+                    game.undo(); seq.pop();
+                }
+                return false;
+            }
+            return dfs(maxPlies, new Set()) ? seq : null;
+        }
+
+        function setBanner(text, kind) { liveBanner = { text, kind }; }
+
+        function handlePlacement(placement, conf) {
+            const side = coachSide();
+            const describeTurn = () => {
+                const mover = game.turn() === 'w' ? 'White' : 'Black';
+                return (side === 'both' || game.turn() === side) ? mover + ' to move' : mover + "'s move — waiting";
+            };
+
+            if (placement === lastSeen) seenCount++; else { lastSeen = placement; seenCount = 1; }
+
+            if (placement === game.fen().split(' ')[0]) {
+                boardChanging = false;
+                if (!liveSynced) { liveSynced = true; analyzePosition(game.fen()); }
+                liveSynced = true;
+                setBanner('LIVE · ' + describeTurn(), 'ok');
+                setLiveStatus('Live: board in sync.');
+                return;
+            }
+
+            // The screen stopped matching our game: never leave the old position's arrows up.
+            if (!boardChanging) { boardChanging = true; pushOverlay(); }
+            if (seenCount < 2) { setBanner('LIVE · updating…', 'warn'); return; }   // ignore single blurry frames
+
+            // Did the chess site take back one or more moves? Compare with earlier positions of this game.
+            {
+                const undone = [];
+                let matched = false;
+                for (let i = 0; i < 4 && game.history().length > 0; i++) {
+                    undone.push(game.undo());
+                    if (game.fen().split(' ')[0] === placement) { matched = true; break; }
+                }
+                if (matched) {
+                    board.position(game.fen());
+                    liveSynced = true;
+                    boardChanging = false;
+                    analyzePosition(game.fen());
+                    setBanner('LIVE · move taken back · ' + describeTurn(), 'warn');
+                    setLiveStatus('Live: detected a take-back of ' + undone.length + (undone.length === 1 ? ' move.' : ' moves.'));
+                    return;
+                }
+                // not a take-back: put the moves back exactly as they were
+                for (let i = undone.length - 1; i >= 0; i--) {
+                    game.move({ from: undone[i].from, to: undone[i].to, promotion: undone[i].promotion });
+                }
+            }
+
+            // Explain what we see with 1-4 legal moves (handles fast replies / bots)
+            let seq = null;
+            if (placement !== failedSearch) {
+                seq = findMoveSequence(placement, 4);
+                if (!seq) failedSearch = placement;   // don't re-search the same unexplainable frame every tick
+            }
+            if (seq) {
+                board.position(game.fen());
+                liveSynced = true;
+                boardChanging = false;
+                analyzePosition(game.fen());
+                setBanner('LIVE · ' + describeTurn(), 'ok');
+                setLiveStatus('Live: detected ' + seq.join(' '));
+                return;
+            }
+
+            // Otherwise resync from what the camera sees - but only once the picture has settled:
+            // shared video is blurry for a moment after pieces move, so an unexplained change must
+            // be read identically on several frames, each with good confidence.
+            if (seenCount < 4 || (conf !== undefined && conf < 0.7)) {
+                setBanner('LIVE · checking the board…', 'warn');
+                return;
+            }
+            const turn = document.getElementById('live-turn').value;
+            const built = buildGame(placement, turn);
+            if (built) {
+                game = built.game;
+                board.position(game.fen());
+                liveSynced = true;
+                boardChanging = false;
+                analyzePosition(game.fen());
+                setBanner('LIVE · resynced · ' + describeTurn(), 'warn');
+                setLiveStatus('Live: board resynced from screen (assuming ' + (built.turn === 'w' ? 'White' : 'Black') + ' to move' +
+                              (built.turn !== turn ? ', because the other side would have been left in check' : '') + ').');
+            } else {
+                // Never leave stale advice on screen
+                markUnsynced("Can't read the board — check the box");
+                setLiveStatus('Live: unclear frame (not a valid position). Is something covering the board, or is the box off?');
+            }
+        }
+
+        // Redraw arrows when window resizes
+        window.addEventListener('resize', () => {
+            board.resize();
+            if (coachMode) drawArrows();
+        });
+
+        initEngine();
+    </script>
+</body>
+</html>
